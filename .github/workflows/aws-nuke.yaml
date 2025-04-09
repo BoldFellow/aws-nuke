@@ -1,5 +1,10 @@
 name: AWS-Nuke Organization Cleanup
 
+# Add necessary permissions for OIDC authentication
+permissions:
+  id-token: write
+  contents: read
+
 on:
   # Scheduled trigger
   schedule:
@@ -20,7 +25,7 @@ on:
         description: 'Comma-separated list of account IDs to exclude'
         type: string
         required: false
-        default: "772886489592,222222222222"  # Management account and production accounts
+        default: "772886489592"  # Management account
 
 env:
   AWS_REGION: 'us-east-1'
@@ -34,7 +39,7 @@ jobs:
     
     steps:
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
+        uses: aws-actions/configure-aws-credentials@v3
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
@@ -53,8 +58,8 @@ jobs:
               ACCOUNTS=$(echo "$ACCOUNTS" | grep -v "$ACCOUNT")
             done
           else
-            # Default exclusions from environment
-            DEFAULT_EXCLUDED="772886489592 222222222222"  # Management account and production
+            # Default exclusions - just the management account
+            DEFAULT_EXCLUDED="772886489592"
             for ACCOUNT in $DEFAULT_EXCLUDED; do
               ACCOUNTS=$(echo "$ACCOUNTS" | grep -v "$ACCOUNT")
             done
@@ -89,7 +94,7 @@ jobs:
           echo "TARGET_ACCOUNTS=${{ needs.fetch-accounts.outputs.target_accounts }}" >> $GITHUB_ENV
       
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
+        uses: aws-actions/configure-aws-credentials@v3
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
@@ -108,12 +113,18 @@ jobs:
           regions:
             - global
             - us-east-1
+            - us-east-2
             - us-west-1
             - us-west-2
+            - eu-west-1
+            - eu-central-1
+            - ap-southeast-1
+            - ap-southeast-2
+            - ap-northeast-1
+            - sa-east-1
           
           account-blocklist:
             - "772886489592"  # Management account
-            - "222222222222"  # Production account
           
           accounts:
             # This will apply to all accounts not explicitly defined
@@ -127,6 +138,8 @@ jobs:
                   - "role:OrganizationAccountAccessRole:*"
                 IAMPolicy:
                   - "default"
+                CloudFormationStack:
+                  - "StackSet-AWS-Landing-Zone*"
           
           resource-types:
             targets:
@@ -143,11 +156,31 @@ jobs:
               - DynamoDBTable
               - ElasticacheCluster
               - Lambda
+              - IAMPolicy
+              - IAMGroup
+              - IAMGroupPolicy
+              - IAMGroupPolicyAttachment
+              - AutoScalingGroup
+              - LaunchConfiguration
+              - LaunchTemplate
+              - EBSVolume
+              - ElasticBeanstalkApplication
+              - ElasticBeanstalkEnvironment
+              - ElasticLoadBalancer
+              - ElasticLoadBalancingV2LoadBalancer
+              - ElasticLoadBalancingV2TargetGroup
+              - SQSQueue
+              - SNSTopic
+              - CloudWatchAlarm
+              - KMSKey
+              - KMSAlias
             
             excludes:
               - IAMUser
               - IAMUserPolicyAttachment
               - IAMUserAccessKey
+              - IAMRole
+              - IAMRolePolicyAttachment
           EOL
       
       - name: Run AWS-Nuke
@@ -168,96 +201,9 @@ jobs:
           echo "Running command: $CMD"
           $CMD
       
-      # - name: Notify Slack on success
-      #   if: success()
-      #   uses: slackapi/slack-github-action@v1.24.0
-      #   with:
-      #     payload: |
-      #       {
-      #         "text": "AWS-Nuke completed successfully ✅",
-      #         "blocks": [
-      #           {
-      #             "type": "section",
-      #             "text": {
-      #               "type": "mrkdwn",
-      #               "text": "*AWS-Nuke completed successfully* ✅"
-      #             }
-      #           },
-      #           {
-      #             "type": "section",
-      #             "fields": [
-      #               {
-      #                 "type": "mrkdwn",
-      #                 "text": "*Mode:*\n${{ env.DRY_RUN == 'true' && 'Dry Run' || 'Destructive' }}"
-      #               },
-      #               {
-      #                 "type": "mrkdwn",
-      #                 "text": "*Target Accounts:*\n${{ env.TARGET_ACCOUNTS }}"
-      #               }
-      #             ]
-      #           },
-      #           {
-      #             "type": "actions",
-      #             "elements": [
-      #               {
-      #                 "type": "button",
-      #                 "text": {
-      #                   "type": "plain_text",
-      #                   "text": "View Run"
-      #                 },
-      #                 "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-      #               }
-      #             ]
-      #           }
-      #         ]
-      #       }
-      #   env:
-      #     SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-      #     SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
-      
-      # - name: Notify Slack on failure
-      #   if: failure()
-      #   uses: slackapi/slack-github-action@v1.24.0
-      #   with:
-      #     payload: |
-      #       {
-      #         "text": "AWS-Nuke failed ❌",
-      #         "blocks": [
-      #           {
-      #             "type": "section",
-      #             "text": {
-      #               "type": "mrkdwn",
-      #               "text": "*AWS-Nuke execution failed* ❌"
-      #             }
-      #           },
-      #           {
-      #             "type": "section",
-      #             "fields": [
-      #               {
-      #                 "type": "mrkdwn",
-      #                 "text": "*Mode:*\n${{ env.DRY_RUN == 'true' && 'Dry Run' || 'Destructive' }}"
-      #               },
-      #               {
-      #                 "type": "mrkdwn",
-      #                 "text": "*Target Accounts:*\n${{ env.TARGET_ACCOUNTS }}"
-      #               }
-      #             ]
-      #           },
-      #           {
-      #             "type": "actions",
-      #             "elements": [
-      #               {
-      #                 "type": "button",
-      #                 "text": {
-      #                   "type": "plain_text",
-      #                   "text": "View Logs"
-      #                 },
-      #                 "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-      #               }
-      #             ]
-      #           }
-      #         ]
-      #       }
-      #   env:
-      #     SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-      #     SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+      - name: Report Results
+        if: always()
+        run: |
+          echo "AWS-Nuke execution completed"
+          echo "Mode: ${{ env.DRY_RUN == 'true' && 'Dry Run' || 'Destructive' }}"
+          echo "Target Accounts: ${{ env.TARGET_ACCOUNTS }}"
