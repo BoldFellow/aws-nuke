@@ -220,13 +220,12 @@ jobs:
               - EC2Address
               
               # VPC & Networking Resources
-              - EC2VPC
-              - EC2Subnet
-              - EC2RouteTable
-              - EC2InternetGateway
+              # - EC2VPC
+              # - EC2Subnet
+              # - EC2RouteTable
+              # - EC2InternetGateway
               - EC2NatGateway
               - EC2EIP
-              - EC2DHCPOption
               - EC2VPCEndpoint
               - EC2NetworkACL
               - EC2NetworkInterface
