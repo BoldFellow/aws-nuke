@@ -209,6 +209,10 @@ jobs:
           
           # Add the resource types section
           cat >> nuke-config.yaml <<EOL
+
+          prerun:
+            # Steps to run before the main nuking process
+            - aws ec2 detach-internet-gateway --internet-gateway-id igw-0162c18055309bc6f --vpc-id vpc-07136d04a18338b38 || true
           resource-types:
             targets:
               # EC2 & Compute Resources
