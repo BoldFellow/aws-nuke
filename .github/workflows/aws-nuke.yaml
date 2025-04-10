@@ -163,10 +163,7 @@ jobs:
       
       - name: Create AWS-Nuke config
         run: |
-          # Get the target accounts as an array
-          IFS=',' read -ra ACCOUNT_ARRAY <<< "$TARGET_ACCOUNTS"
-          
-          cat > nuke-config.yaml <<EOL
+          cat > nuke-config.yaml <<'EOL'
           regions:
             - global
             - us-east-1
@@ -183,32 +180,7 @@ jobs:
           account-blocklist:
             - "772886489592"  # Management account
           
-          accounts:
-          EOL
-          
-          # Add each target account to the config
-          for ACCOUNT in "${ACCOUNT_ARRAY[@]}"; do
-            # Trim any whitespace
-            ACCOUNT=$(echo "$ACCOUNT" | tr -d ' \t\n\r')
-            if [ -n "$ACCOUNT" ] && [ "$ACCOUNT" != "772886489592" ]; then
-              cat >> nuke-config.yaml <<EOL
-            "$ACCOUNT":
-              filters:
-                IAMRole:
-                  - "OrganizationAccountAccessRole"
-                  - "AWSServiceRoleFor*"
-                IAMRolePolicyAttachment:
-                  - "role:OrganizationAccountAccessRole:*"
-                IAMPolicy:
-                  - "default"
-                CloudFormationStack:
-                  - "StackSet-AWS-Landing-Zone*"
-          EOL
-            fi
-          done
-          
-          # Add the resource types section
-          cat >> nuke-config.yaml <<EOL
+          # Specify resource order for proper dependency handling
           prerun-order:
             # Network cleanup order
             - EC2RouteTableAssociation  # First remove route table associations
@@ -230,8 +202,39 @@ jobs:
             - ElasticLoadBalancingV2TargetGroup
             - ElasticLoadBalancingV2LoadBalancer
             - ElasticLoadBalancer
-
+          
+          accounts:
+            # This will apply to all accounts
+            "*":
+              filters:
+                # Exclude key roles and resources
+                IAMRole:
+                  - "OrganizationAccountAccessRole"
+                  - "AWSServiceRoleFor*"
+                IAMRolePolicyAttachment:
+                  - "role:OrganizationAccountAccessRole:*"
+                IAMPolicy:
+                  - "default"
+                CloudFormationStack:
+                  - "StackSet-AWS-Landing-Zone*"
+                EC2SecurityGroup:
+                  - property:GroupName=default
+                KMSAlias:
+                  - property:AliasName=^alias/aws/.*
+              
+              # Special handling for default VPCs and other resources
+              prerun:
+                EC2VPC:
+                  - "property:IsDefault=true":
+                      config:
+                        force-delete: true
+                EC2RouteTable:
+                  - "property:Associations[*].Main=true":
+                      config:
+                        force-delete: true
+          
           resource-types:
+            # Include resources to explicitly target
             targets:
               # EC2 & Compute Resources
               - EC2Instance
@@ -240,11 +243,15 @@ jobs:
               - EC2KeyPair
               - EC2SecurityGroup
               - EC2Address
+              - AutoScalingGroup
+              - LaunchConfiguration
+              - LaunchTemplate
               
-              # VPC & Networking Resources
+              # Network Resources
               - EC2VPC
               - EC2Subnet
               - EC2RouteTable
+              - EC2Route
               - EC2InternetGateway
               - EC2NatGateway
               - EC2EIP
@@ -258,6 +265,10 @@ jobs:
               - EC2TransitGateway
               - EC2TransitGatewayRouteTable
               - EC2TransitGatewayVpcAttachment
+              - EC2RouteTableAssociation
+              - EC2SubnetRouteTableAssociation
+              - EC2InternetGatewayAttachment
+              - EC2VPCGatewayAttachment
               
               # Load Balancing & DNS
               - ElasticLoadBalancer
@@ -306,17 +317,6 @@ jobs:
               
               # Deployment & Management
               - CloudFormationStack
-              - AutoScalingGroup
-              - LaunchConfiguration
-              - LaunchTemplate
-              
-              # Security & Identity
-              - KMSKey
-              - KMSAlias
-              # - IAMGroup
-              # - IAMGroupPolicy
-              # - IAMGroupPolicyAttachment
-              # - IAMPolicy
               
               # Application Services
               - ElasticBeanstalkApplication
@@ -334,14 +334,24 @@ jobs:
               - SecretsManagerSecret
               - SSMParameter
             
+            # Exclude resources we don't want to delete
             excludes:
+              # IAM resources (skip completely)
               - IAMUser
-              - IAMGroup
-              - IAMRole
-              - IAMPolicy
               - IAMUserPolicyAttachment
+              - IAMUserAccessKey
+              - IAMGroup
+              - IAMGroupPolicy
               - IAMGroupPolicyAttachment
+              - IAMRole
+              - IAMRolePolicy
               - IAMRolePolicyAttachment
+              - IAMPolicy
+              - IAMInstanceProfile
+              
+              # Default/critical AWS resources
+              - KMSKey
+              - CloudTrail
           EOL
           
           # Print the config file for debugging
