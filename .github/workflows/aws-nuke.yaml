@@ -209,28 +209,6 @@ jobs:
           
           # Add the resource types section
           cat >> nuke-config.yaml <<EOL
-          prerun-order:
-            # Network cleanup order
-            - EC2RouteTableAssociation  # First remove route table associations
-            - EC2SubnetRouteTableAssociation
-            - EC2NetworkInterfaceAttachment
-            - EC2NetworkInterface
-            - EC2InternetGatewayAttachment
-            - EC2VPCGatewayAttachment
-            - EC2NATGateway
-            - EC2Route
-            - EC2SecurityGroup
-            - EC2Subnet
-            - EC2RouteTable
-            - EC2InternetGateway
-            - EC2VPC
-            - EC2DHCPOption
-            
-            # ELB and related resources
-            - ElasticLoadBalancingV2TargetGroup
-            - ElasticLoadBalancingV2LoadBalancer
-            - ElasticLoadBalancer
-
           resource-types:
             targets:
               # EC2 & Compute Resources
