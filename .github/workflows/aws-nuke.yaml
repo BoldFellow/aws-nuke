@@ -60,28 +60,44 @@ jobs:
           
           echo "Found accounts: $ACCOUNTS"
           
-          # Handle manual exclusions if provided
-          EXCLUDED="${{ github.event.inputs.excluded_accounts }}"
-          if [ -n "$EXCLUDED" ]; then
-            echo "Excluding manually specified accounts: $EXCLUDED"
-            for ACCOUNT in $(echo $EXCLUDED | tr ',' ' '); do
-              ACCOUNTS=$(echo "$ACCOUNTS" | grep -v "$ACCOUNT" || echo "$ACCOUNTS")
-            done
-          fi
-          
           # Always exclude the management account
           MGMT_ACCOUNT="772886489592"
           echo "Excluding management account: $MGMT_ACCOUNT"
           ACCOUNTS=$(echo "$ACCOUNTS" | grep -v "$MGMT_ACCOUNT" || echo "$ACCOUNTS")
           
+          # Handle manual exclusions if provided
+          EXCLUDED="${{ github.event.inputs.excluded_accounts }}"
+          if [ -n "$EXCLUDED" ]; then
+            echo "Excluding manually specified accounts: $EXCLUDED"
+            for ACCOUNT in $(echo $EXCLUDED | tr ',' ' '); do
+              # Skip management account (already excluded)
+              if [ "$ACCOUNT" != "$MGMT_ACCOUNT" ]; then
+                ACCOUNTS=$(echo "$ACCOUNTS" | grep -v "$ACCOUNT" || echo "$ACCOUNTS")
+              fi
+            done
+          fi
+          
           # Handle targeted accounts if provided
           TARGET_ACCOUNTS="${{ github.event.inputs.target_accounts }}"
           if [ -n "$TARGET_ACCOUNTS" ]; then
             echo "Using manually targeted accounts: $TARGET_ACCOUNTS"
-            ACCOUNTS="$TARGET_ACCOUNTS"
+            # Convert to array, remove management account, then back to CSV
+            TEMP_ACCOUNTS=""
+            for ACCOUNT in $(echo $TARGET_ACCOUNTS | tr ',' ' '); do
+              if [ "$ACCOUNT" != "$MGMT_ACCOUNT" ]; then
+                if [ -z "$TEMP_ACCOUNTS" ]; then
+                  TEMP_ACCOUNTS="$ACCOUNT"
+                else
+                  TEMP_ACCOUNTS="$TEMP_ACCOUNTS,$ACCOUNT"
+                fi
+              else
+                echo "Removing management account $MGMT_ACCOUNT from target list"
+              fi
+            done
+            ACCOUNTS="$TEMP_ACCOUNTS"
           fi
           
-          # Format the accounts for AWS-Nuke
+          # Format the accounts for AWS-Nuke (comma-separated, no spaces)
           ACCOUNTS=$(echo "$ACCOUNTS" | tr ' ' ',' | tr -d '\n')
           echo "Final account list: $ACCOUNTS"
           echo "target_accounts=$ACCOUNTS" >> $GITHUB_OUTPUT
@@ -200,7 +216,9 @@ jobs:
             CMD="$CMD --dry-run"
           fi
           if [ -n "$TARGET_ACCOUNTS" ]; then
-            CMD="$CMD --target-accounts $TARGET_ACCOUNTS"
+            # Ensure the target accounts are properly formatted (comma-separated with no spaces)
+            FORMATTED_ACCOUNTS=$(echo "$TARGET_ACCOUNTS" | tr ' ' ',' | tr -d ' \t\n\r')
+            CMD="$CMD --target-accounts $FORMATTED_ACCOUNTS"
           fi
           echo "Running command: $CMD"
           $CMD
