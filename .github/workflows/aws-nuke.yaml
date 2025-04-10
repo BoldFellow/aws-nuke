@@ -137,6 +137,9 @@ jobs:
       
       - name: Create AWS-Nuke config
         run: |
+          # Get the target accounts as an array
+          IFS=',' read -ra ACCOUNT_ARRAY <<< "$TARGET_ACCOUNTS"
+          
           cat > nuke-config.yaml <<EOL
           regions:
             - global
@@ -155,7 +158,15 @@ jobs:
             - "772886489592"  # Management account
           
           accounts:
-            "*":
+          EOL
+          
+          # Add each target account to the config
+          for ACCOUNT in "${ACCOUNT_ARRAY[@]}"; do
+            # Trim any whitespace
+            ACCOUNT=$(echo "$ACCOUNT" | tr -d ' \t\n\r')
+            if [ -n "$ACCOUNT" ] && [ "$ACCOUNT" != "772886489592" ]; then
+              cat >> nuke-config.yaml <<EOL
+            "$ACCOUNT":
               filters:
                 IAMRole:
                   - "OrganizationAccountAccessRole"
@@ -166,7 +177,12 @@ jobs:
                   - "default"
                 CloudFormationStack:
                   - "StackSet-AWS-Landing-Zone*"
+          EOL
+            fi
+          done
           
+          # Add the resource types section
+          cat >> nuke-config.yaml <<EOL
           resource-types:
             targets:
               - EC2Instance
@@ -208,18 +224,23 @@ jobs:
               - IAMRole
               - IAMRolePolicyAttachment
           EOL
+          
+          # Print the config file for debugging
+          echo "Generated AWS-Nuke config:"
+          cat nuke-config.yaml
       
       - name: Run AWS-Nuke
         run: |
-          CMD="aws-nuke --config nuke-config.yaml --no-prompt"
-          if [ "$DRY_RUN" == "true" ]; then
-            CMD="$CMD --dry-run"
+          CMD="aws-nuke --config nuke-config.yaml"
+          
+          # Add dry-run flag (note the flag has changed to --no-dry-run)
+          if [ "$DRY_RUN" != "true" ]; then
+            CMD="$CMD --no-dry-run"
           fi
-          if [ -n "$TARGET_ACCOUNTS" ]; then
-            # Ensure the target accounts are properly formatted (comma-separated with no spaces)
-            FORMATTED_ACCOUNTS=$(echo "$TARGET_ACCOUNTS" | tr ' ' ',' | tr -d ' \t\n\r')
-            CMD="$CMD --target-accounts $FORMATTED_ACCOUNTS"
-          fi
+          
+          # Add --force to bypass confirmation prompts
+          CMD="$CMD --force"
+          
           echo "Running command: $CMD"
           $CMD
       
