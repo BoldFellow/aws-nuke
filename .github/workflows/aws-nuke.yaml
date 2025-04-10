@@ -186,26 +186,26 @@ jobs:
           accounts:
           EOL
           
-          # Add each target account to the config
-          for ACCOUNT in "${ACCOUNT_ARRAY[@]}"; do
-            # Trim any whitespace
-            ACCOUNT=$(echo "$ACCOUNT" | tr -d ' \t\n\r')
-            if [ -n "$ACCOUNT" ] && [ "$ACCOUNT" != "772886489592" ]; then
-              cat >> nuke-config.yaml <<EOL
-            "$ACCOUNT":
-              filters:
-                IAMRole:
-                  - "OrganizationAccountAccessRole"
-                  - "AWSServiceRoleFor*"
-                IAMRolePolicyAttachment:
-                  - "role:OrganizationAccountAccessRole:*"
-                IAMPolicy:
-                  - "default"
-                CloudFormationStack:
-                  - "StackSet-AWS-Landing-Zone*"
-          EOL
-            fi
-          done
+          # # Add each target account to the config
+          # for ACCOUNT in "${ACCOUNT_ARRAY[@]}"; do
+          #   # Trim any whitespace
+          #   ACCOUNT=$(echo "$ACCOUNT" | tr -d ' \t\n\r')
+          #   if [ -n "$ACCOUNT" ] && [ "$ACCOUNT" != "772886489592" ]; then
+          #     cat >> nuke-config.yaml <<EOL
+          #   "$ACCOUNT":
+          #     filters:
+          #       IAMRole:
+          #         - "OrganizationAccountAccessRole"
+          #         - "AWSServiceRoleFor*"
+          #       IAMRolePolicyAttachment:
+          #         - "role:OrganizationAccountAccessRole:*"
+          #       IAMPolicy:
+          #         - "default"
+          #       CloudFormationStack:
+          #         - "StackSet-AWS-Landing-Zone*"
+          # EOL
+          #   fi
+          # done
           
           # Add the resource types section
           cat >> nuke-config.yaml <<EOL
@@ -320,13 +320,7 @@ jobs:
               - IAMUserPolicyAttachment
               - IAMGroupPolicyAttachment
               - IAMRolePolicyAttachment
-              
-             ordering:
-              - EC2RouteTable
-              - EC2Subnet
-              - EC2InternetGateway
-              - EC2VPC
-              - EC2DHCPOption
+
           EOL
           
           # Print the config file for debugging
