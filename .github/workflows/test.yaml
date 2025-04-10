@@ -21,3 +21,34 @@ jobs:
         run: |
           aws sts get-caller-identity
           echo "Authentication successful!"
+    
+      - name: Get organization accounts
+        id: get-accounts
+        run: |
+          # Get all accounts in the organization
+          ACCOUNTS=$(aws organizations list-accounts --query "Accounts[?Status=='ACTIVE'].Id" --output text)
+          
+          # Handle manual exclusions if provided
+          if [ -n "${{ github.event.inputs.excluded_accounts }}" ]; then
+            EXCLUDED="${{ github.event.inputs.excluded_accounts }}"
+            for ACCOUNT in $EXCLUDED; do
+              ACCOUNTS=$(echo "$ACCOUNTS" | grep -v "$ACCOUNT")
+            done
+          else
+            # Default exclusions - just the management account
+            DEFAULT_EXCLUDED="772886489592"
+            for ACCOUNT in $DEFAULT_EXCLUDED; do
+              ACCOUNTS=$(echo "$ACCOUNTS" | grep -v "$ACCOUNT")
+            done
+          fi
+          
+          # Handle targeted accounts if provided
+          if [ -n "${{ github.event.inputs.target_accounts }}" ]; then
+            ACCOUNTS="${{ github.event.inputs.target_accounts }}"
+          fi
+          
+          # Format the accounts for AWS-Nuke
+          ACCOUNTS=$(echo "$ACCOUNTS" | tr ' ' ',')
+          echo "target_accounts=$ACCOUNTS" >> $GITHUB_OUTPUT
+          echo "Accounts to be processed: $ACCOUNTS"
+    
