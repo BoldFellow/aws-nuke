@@ -60,48 +60,74 @@ jobs:
           
           echo "Found accounts: $ACCOUNTS"
           
-          # Always exclude the management account
+          # Create an array from the space-separated account list
+          ACCOUNTS_ARRAY=($ACCOUNTS)
+          FILTERED_ACCOUNTS=()
+          
+          # Management account ID
           MGMT_ACCOUNT="772886489592"
-          echo "Excluding management account: $MGMT_ACCOUNT"
-          ACCOUNTS=$(echo "$ACCOUNTS" | grep -v "$MGMT_ACCOUNT" || echo "$ACCOUNTS")
+          echo "Management account ID: $MGMT_ACCOUNT"
+          
+          # Add accounts to the filtered list, excluding management account
+          for ACCOUNT in "${ACCOUNTS_ARRAY[@]}"; do
+            if [ "$ACCOUNT" != "$MGMT_ACCOUNT" ]; then
+              FILTERED_ACCOUNTS+=("$ACCOUNT")
+            else
+              echo "Excluding management account: $ACCOUNT"
+            fi
+          done
           
           # Handle manual exclusions if provided
           EXCLUDED="${{ github.event.inputs.excluded_accounts }}"
           if [ -n "$EXCLUDED" ]; then
-            echo "Excluding manually specified accounts: $EXCLUDED"
-            for ACCOUNT in $(echo $EXCLUDED | tr ',' ' '); do
-              # Skip management account (already excluded)
-              if [ "$ACCOUNT" != "$MGMT_ACCOUNT" ]; then
-                ACCOUNTS=$(echo "$ACCOUNTS" | grep -v "$ACCOUNT" || echo "$ACCOUNTS")
+            echo "Processing manual exclusions: $EXCLUDED"
+            IFS=',' read -ra EXCLUDE_ARRAY <<< "$EXCLUDED"
+            
+            # Create a temporary array for the second filtering
+            TEMP_ACCOUNTS=()
+            
+            for ACCOUNT in "${FILTERED_ACCOUNTS[@]}"; do
+              EXCLUDE_THIS=false
+              for EXCLUDE_ID in "${EXCLUDE_ARRAY[@]}"; do
+                if [ "$ACCOUNT" = "$EXCLUDE_ID" ]; then
+                  EXCLUDE_THIS=true
+                  echo "Excluding manually specified account: $ACCOUNT"
+                  break
+                fi
+              done
+              
+              if [ "$EXCLUDE_THIS" = false ]; then
+                TEMP_ACCOUNTS+=("$ACCOUNT")
               fi
             done
+            
+            # Update the filtered accounts array
+            FILTERED_ACCOUNTS=("${TEMP_ACCOUNTS[@]}")
           fi
           
           # Handle targeted accounts if provided
           TARGET_ACCOUNTS="${{ github.event.inputs.target_accounts }}"
           if [ -n "$TARGET_ACCOUNTS" ]; then
             echo "Using manually targeted accounts: $TARGET_ACCOUNTS"
-            # Convert to array, remove management account, then back to CSV
-            TEMP_ACCOUNTS=""
-            for ACCOUNT in $(echo $TARGET_ACCOUNTS | tr ',' ' '); do
-              if [ "$ACCOUNT" != "$MGMT_ACCOUNT" ]; then
-                if [ -z "$TEMP_ACCOUNTS" ]; then
-                  TEMP_ACCOUNTS="$ACCOUNT"
-                else
-                  TEMP_ACCOUNTS="$TEMP_ACCOUNTS,$ACCOUNT"
-                fi
+            IFS=',' read -ra TARGET_ARRAY <<< "$TARGET_ACCOUNTS"
+            
+            # Replace filtered accounts with targeted accounts (excluding management)
+            FILTERED_ACCOUNTS=()
+            for TARGET_ID in "${TARGET_ARRAY[@]}"; do
+              if [ "$TARGET_ID" != "$MGMT_ACCOUNT" ]; then
+                FILTERED_ACCOUNTS+=("$TARGET_ID")
               else
-                echo "Removing management account $MGMT_ACCOUNT from target list"
+                echo "Excluding management account from targets: $TARGET_ID"
               fi
             done
-            ACCOUNTS="$TEMP_ACCOUNTS"
           fi
           
-          # Format the accounts for AWS-Nuke (comma-separated, no spaces)
-          ACCOUNTS=$(echo "$ACCOUNTS" | tr ' ' ',' | tr -d '\n')
-          echo "Final account list: $ACCOUNTS"
-          echo "target_accounts=$ACCOUNTS" >> $GITHUB_OUTPUT
-          echo "Accounts to be processed: $ACCOUNTS"
+          # Convert array back to comma-separated string
+          FINAL_ACCOUNTS=$(IFS=,; echo "${FILTERED_ACCOUNTS[*]}")
+          
+          echo "Final account list: ${FILTERED_ACCOUNTS[*]}"
+          echo "Accounts to be processed: $FINAL_ACCOUNTS"
+          echo "target_accounts=$FINAL_ACCOUNTS" >> $GITHUB_OUTPUT
 
   aws-nuke:
     name: Run AWS-Nuke
@@ -185,37 +211,106 @@ jobs:
           cat >> nuke-config.yaml <<EOL
           resource-types:
             targets:
+              # EC2 & Compute Resources
               - EC2Instance
               - EC2Volume
               - EC2Snapshot
-              - ECSCluster
-              - ECSService
-              - ECSTaskDefinition
-              - RDSInstance
-              - S3Bucket
-              - S3Object
-              - CloudFormationStack
-              - DynamoDBTable
-              - ElasticacheCluster
-              - Lambda
-              - IAMPolicy
-              - IAMGroup
-              - IAMGroupPolicy
-              - IAMGroupPolicyAttachment
-              - AutoScalingGroup
-              - LaunchConfiguration
-              - LaunchTemplate
-              - EBSVolume
-              - ElasticBeanstalkApplication
-              - ElasticBeanstalkEnvironment
+              - EC2KeyPair
+              - EC2SecurityGroup
+              - EC2Address
+              
+              # VPC & Networking Resources
+              - EC2VPC
+              - EC2Subnet
+              - EC2RouteTable
+              - EC2InternetGateway
+              - EC2NatGateway
+              - EC2EIP
+              - EC2DHCPOption
+              - EC2VPCEndpoint
+              - EC2NetworkACL
+              - EC2NetworkInterface
+              - EC2CustomerGateway
+              - EC2VPNGateway
+              - EC2VPNConnection
+              - EC2TransitGateway
+              - EC2TransitGatewayRouteTable
+              - EC2TransitGatewayVpcAttachment
+              
+              # Load Balancing & DNS
               - ElasticLoadBalancer
               - ElasticLoadBalancingV2LoadBalancer
               - ElasticLoadBalancingV2TargetGroup
+              - Route53HostedZone
+              - Route53ResourceRecordSet
+              
+              # Containers & Orchestration
+              - ECSCluster
+              - ECSService
+              - ECSTaskDefinition
+              - EKSCluster
+              
+              # Database Services
+              - RDSInstance
+              - RDSCluster
+              - RDSClusterParameterGroup
+              - RDSParameterGroup
+              - RDSOptionGroup
+              - RDSSubnetGroup
+              - DynamoDBTable
+              - ElasticacheCluster
+              - ElasticacheSubnetGroup
+              - RedshiftCluster
+              
+              # Storage
+              - S3Bucket
+              - S3Object
+              - EBSVolume
+              - EFSFileSystem
+              - EFSMountTarget
+              
+              # Serverless & Functions
+              - Lambda
+              - LambdaFunction
+              - LambdaLayer
+              
+              # Application Services
               - SQSQueue
               - SNSTopic
+              - SNSSubscription
               - CloudWatchAlarm
+              - CloudWatchDashboard
+              - CloudWatchLogGroup
+              
+              # Deployment & Management
+              - CloudFormationStack
+              - AutoScalingGroup
+              - LaunchConfiguration
+              - LaunchTemplate
+              
+              # Security & Identity
               - KMSKey
               - KMSAlias
+              - IAMGroup
+              - IAMGroupPolicy
+              - IAMGroupPolicyAttachment
+              - IAMPolicy
+              
+              # Application Services
+              - ElasticBeanstalkApplication
+              - ElasticBeanstalkEnvironment
+              
+              # CDN & Media
+              - CloudFrontDistribution
+              
+              # API Gateway
+              - APIGatewayRestAPI
+              - APIGatewayResource
+              - APIGatewayStage
+              
+              # Secrets & Parameters
+              - SecretsManagerSecret
+              - SSMParameter
             
             excludes:
               - IAMUser
@@ -231,18 +326,34 @@ jobs:
       
       - name: Run AWS-Nuke
         run: |
-          CMD="aws-nuke --config nuke-config.yaml"
+          # First, list accounts to nuke 
+          ACCOUNTS_TO_NUKE=$(echo "$TARGET_ACCOUNTS" | tr ',' ' ')
           
-          # Add dry-run flag (note the flag has changed to --no-dry-run)
-          if [ "$DRY_RUN" != "true" ]; then
-            CMD="$CMD --no-dry-run"
+          if [ -z "$ACCOUNTS_TO_NUKE" ]; then
+            echo "No accounts to process. Exiting."
+            exit 0
           fi
           
-          # Add --force to bypass confirmation prompts
-          CMD="$CMD --force"
-          
-          echo "Running command: $CMD"
-          $CMD
+          # For each account, run AWS-Nuke separately
+          for ACCOUNT_ID in $ACCOUNTS_TO_NUKE; do
+            if [ "$ACCOUNT_ID" != "772886489592" ]; then
+              echo "Processing account: $ACCOUNT_ID"
+              
+              ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/OrganizationAccountAccessRole"
+              
+              CMD="aws-nuke --config nuke-config.yaml --force --assume-role-arn $ROLE_ARN"
+              
+              # Add dry-run flag
+              if [ "$DRY_RUN" != "true" ]; then
+                CMD="$CMD --no-dry-run"
+              fi
+              
+              echo "Running command: $CMD"
+              $CMD || echo "Failed for account $ACCOUNT_ID"
+            else
+              echo "Skipping management account $ACCOUNT_ID"
+            fi
+          done
       
       - name: Report Results
         if: always()
