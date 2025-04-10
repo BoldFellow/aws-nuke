@@ -45,165 +45,170 @@ jobs:
           aws-region: us-east-1
           role-session-name: GitHubActionsAWSNuke
       
-      - name: Get organization accounts
-        id: get-accounts
-        run: |
-          # Get all accounts in the organization
-          ACCOUNTS=$(aws organizations list-accounts --query "Accounts[?Status=='ACTIVE'].Id" --output text)
+  #     - name: Get organization accounts
+  #       id: get-accounts
+  #       run: |
+  #         # Get all accounts in the organization
+  #         ACCOUNTS=$(aws organizations list-accounts --query "Accounts[?Status=='ACTIVE'].Id" --output text)
           
-          # Handle manual exclusions if provided
-          if [ -n "${{ github.event.inputs.excluded_accounts }}" ]; then
-            EXCLUDED="${{ github.event.inputs.excluded_accounts }}"
-            for ACCOUNT in $EXCLUDED; do
-              ACCOUNTS=$(echo "$ACCOUNTS" | grep -v "$ACCOUNT")
-            done
-          else
-            # Default exclusions - just the management account
-            DEFAULT_EXCLUDED="772886489592"
-            for ACCOUNT in $DEFAULT_EXCLUDED; do
-              ACCOUNTS=$(echo "$ACCOUNTS" | grep -v "$ACCOUNT")
-            done
-          fi
+  #         # Handle manual exclusions if provided
+  #         if [ -n "${{ github.event.inputs.excluded_accounts }}" ]; then
+  #           EXCLUDED="${{ github.event.inputs.excluded_accounts }}"
+  #           for ACCOUNT in $EXCLUDED; do
+  #             ACCOUNTS=$(echo "$ACCOUNTS" | grep -v "$ACCOUNT")
+  #           done
+  #         else
+  #           # Default exclusions - just the management account
+  #           DEFAULT_EXCLUDED="772886489592"
+  #           for ACCOUNT in $DEFAULT_EXCLUDED; do
+  #             ACCOUNTS=$(echo "$ACCOUNTS" | grep -v "$ACCOUNT")
+  #           done
+  #         fi
           
-          # Handle targeted accounts if provided
-          if [ -n "${{ github.event.inputs.target_accounts }}" ]; then
-            ACCOUNTS="${{ github.event.inputs.target_accounts }}"
-          fi
+  #         # Handle targeted accounts if provided
+  #         if [ -n "${{ github.event.inputs.target_accounts }}" ]; then
+  #           ACCOUNTS="${{ github.event.inputs.target_accounts }}"
+  #         fi
           
-          # Format the accounts for AWS-Nuke
-          ACCOUNTS=$(echo "$ACCOUNTS" | tr ' ' ',')
-          echo "target_accounts=$ACCOUNTS" >> $GITHUB_OUTPUT
-          echo "Accounts to be processed: $ACCOUNTS"
+  #         # Format the accounts for AWS-Nuke
+  #         ACCOUNTS=$(echo "$ACCOUNTS" | tr ' ' ',')
+  #         echo "target_accounts=$ACCOUNTS" >> $GITHUB_OUTPUT
+  #         echo "Accounts to be processed: $ACCOUNTS"
   
-  aws-nuke:
-    name: Run AWS-Nuke
-    runs-on: ubuntu-latest
-    needs: fetch-accounts
+  # aws-nuke:
+  #   name: Run AWS-Nuke
+  #   runs-on: ubuntu-latest
+  #   needs: fetch-accounts
     
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+  #   steps:
+  #     - name: Checkout code
+  #       uses: actions/checkout@v3
       
-      - name: Set up environment variables
-        run: |
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            echo "DRY_RUN=${{ github.event.inputs.dry_run }}" >> $GITHUB_ENV
-          else
-            echo "DRY_RUN=true" >> $GITHUB_ENV
-          fi
-          echo "TARGET_ACCOUNTS=${{ needs.fetch-accounts.outputs.target_accounts }}" >> $GITHUB_ENV
+  #     - name: Set up environment variables
+  #       run: |
+  #         if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+  #           echo "DRY_RUN=${{ github.event.inputs.dry_run }}" >> $GITHUB_ENV
+  #         else
+  #           echo "DRY_RUN=true" >> $GITHUB_ENV
+  #         fi
+  #         echo "TARGET_ACCOUNTS=${{ needs.fetch-accounts.outputs.target_accounts }}" >> $GITHUB_ENV
+  #         export TARGET_ACCOUNTS=${{ needs.fetch-accounts.outputs.target_accounts }}
       
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v3
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: us-east-1
-          role-session-name: GitHubActionsAWSNuke
+  #     - name: Configure AWS credentials
+  #       uses: aws-actions/configure-aws-credentials@v3
+  #       with:
+  #         role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+  #         aws-region: us-east-1
+  #         role-session-name: GitHubActionsAWSNuke
       
-      - name: Download AWS-Nuke
-        run: |
-          LATEST_VERSION=$(curl -s https://api.github.com/repos/rebuy-de/aws-nuke/releases/latest | jq -r .tag_name)
-          curl -sL "https://github.com/rebuy-de/aws-nuke/releases/download/${LATEST_VERSION}/aws-nuke-${LATEST_VERSION}-linux-amd64.tar.gz" | tar xz
-          chmod +x ./aws-nuke-${LATEST_VERSION}-linux-amd64
-          sudo mv ./aws-nuke-${LATEST_VERSION}-linux-amd64 /usr/local/bin/aws-nuke
+  #     - name: Download AWS-Nuke
+  #       run: |
+  #         LATEST_VERSION=$(curl -s https://api.github.com/repos/rebuy-de/aws-nuke/releases/latest | jq -r .tag_name)
+  #         curl -sL "https://github.com/rebuy-de/aws-nuke/releases/download/${LATEST_VERSION}/aws-nuke-${LATEST_VERSION}-linux-amd64.tar.gz" | tar xz
+  #         chmod +x ./aws-nuke-${LATEST_VERSION}-linux-amd64
+  #         sudo mv ./aws-nuke-${LATEST_VERSION}-linux-amd64 /usr/local/bin/aws-nuke
       
-      - name: Create AWS-Nuke config
-        run: |
-          cat > nuke-config.yaml <<EOL
-          regions:
-            - global
-            - us-east-1
-            - us-east-2
-            - us-west-1
-            - us-west-2
-            - eu-west-1
-            - eu-central-1
-            - ap-southeast-1
-            - ap-southeast-2
-            - ap-northeast-1
-            - sa-east-1
+  #     - name: Create AWS-Nuke config
+  #       run: |
+  #         cat > nuke-config.yaml <<EOL
+  #         regions:
+  #           - global
+  #           - us-east-1
+  #           - us-east-2
+  #           - us-west-1
+  #           - us-west-2
+  #           - eu-west-1
+  #           - eu-central-1
+  #           - ap-southeast-1
+  #           - ap-southeast-2
+  #           - ap-northeast-1
+  #           - sa-east-1
           
-          account-blocklist:
-            - "772886489592"  # Management account
+  #         account-blocklist:
+  #           - "772886489592"  # Management account
           
-          accounts:
-            # This will apply to all accounts not explicitly defined
-            # We're using a wildcard configuration
-            "*":
-              filters:
-                IAMRole:
-                  - "OrganizationAccountAccessRole"
-                  - "AWSServiceRoleFor*"
-                IAMRolePolicyAttachment:
-                  - "role:OrganizationAccountAccessRole:*"
-                IAMPolicy:
-                  - "default"
-                CloudFormationStack:
-                  - "StackSet-AWS-Landing-Zone*"
+  #         accounts:
+  #           # This will apply to all accounts not explicitly defined
+  #           # We're using a wildcard configuration
+  #           "*":
+  #             filters:
+  #               IAMRole:
+  #                 - "OrganizationAccountAccessRole"
+  #                 - "AWSServiceRoleFor*"
+  #               IAMRolePolicyAttachment:
+  #                 - "role:OrganizationAccountAccessRole:*"
+  #               IAMPolicy:
+  #                 - "default"
+  #               CloudFormationStack:
+  #                 - "StackSet-AWS-Landing-Zone*"
           
-          resource-types:
-            targets:
-              - EC2Instance
-              - EC2Volume
-              - EC2Snapshot
-              - ECSCluster
-              - ECSService
-              - ECSTaskDefinition
-              - RDSInstance
-              - S3Bucket
-              - S3Object
-              - CloudFormationStack
-              - DynamoDBTable
-              - ElasticacheCluster
-              - Lambda
-              - IAMPolicy
-              - IAMGroup
-              - IAMGroupPolicy
-              - IAMGroupPolicyAttachment
-              - AutoScalingGroup
-              - LaunchConfiguration
-              - LaunchTemplate
-              - EBSVolume
-              - ElasticBeanstalkApplication
-              - ElasticBeanstalkEnvironment
-              - ElasticLoadBalancer
-              - ElasticLoadBalancingV2LoadBalancer
-              - ElasticLoadBalancingV2TargetGroup
-              - SQSQueue
-              - SNSTopic
-              - CloudWatchAlarm
-              - KMSKey
-              - KMSAlias
+  #         resource-types:
+  #           targets:
+  #             - EC2Instance
+  #             - EC2Volume
+  #             - EC2Snapshot
+  #             - ECSCluster
+  #             - ECSService
+  #             - ECSTaskDefinition
+  #             - RDSInstance
+  #             - S3Bucket
+  #             - S3Object
+  #             - CloudFormationStack
+  #             - DynamoDBTable
+  #             - ElasticacheCluster
+  #             - Lambda
+  #             - IAMPolicy
+  #             - IAMGroup
+  #             - IAMGroupPolicy
+  #             - IAMGroupPolicyAttachment
+  #             - AutoScalingGroup
+  #             - LaunchConfiguration
+  #             - LaunchTemplate
+  #             - EBSVolume
+  #             - ElasticBeanstalkApplication
+  #             - ElasticBeanstalkEnvironment
+  #             - ElasticLoadBalancer
+  #             - ElasticLoadBalancingV2LoadBalancer
+  #             - ElasticLoadBalancingV2TargetGroup
+  #             - SQSQueue
+  #             - SNSTopic
+  #             - CloudWatchAlarm
+  #             - KMSKey
+  #             - KMSAlias
             
-            excludes:
-              - IAMUser
-              - IAMUserPolicyAttachment
-              - IAMUserAccessKey
-              - IAMRole
-              - IAMRolePolicyAttachment
-          EOL
+  #           excludes:
+  #             - IAMUser
+  #             - IAMUserPolicyAttachment
+  #             - IAMUserAccessKey
+  #             - IAMRole
+  #             - IAMRolePolicyAttachment
+  #         EOL
       
-      - name: Run AWS-Nuke
-        run: |
-          # Build the AWS-Nuke command
-          CMD="aws-nuke --config nuke-config.yaml --no-prompt"
+  #     - name: Run AWS-Nuke
+  #       run: |
+  #         # Build the AWS-Nuke command
+  #         CMD="aws-nuke --config nuke-config.yaml --no-prompt"
           
-          # Add dry-run flag if needed
-          if [ "${{ env.DRY_RUN }}" == "true" ]; then
-            CMD="$CMD --dry-run"
-          fi
+  #         # Add dry-run flag if needed
+  #         if [ "$DRY_RUN" == "true" ]; then
+  #           CMD="$CMD --dry-run"
+  #         fi
           
-          # Add target accounts if specified
-          if [ -n "${{ env.TARGET_ACCOUNTS }}" ]; then
-            CMD="$CMD --target-accounts ${{ env.TARGET_ACCOUNTS }}"
-          fi
+  #         # Add target accounts if specified
+  #         if [ -n "$TARGET_ACCOUNTS" ]; then
+  #           CMD="$CMD --target-accounts $TARGET_ACCOUNTS"
+  #         fi
           
-          echo "Running command: $CMD"
-          $CMD
+  #         echo "Running command: $CMD"
+  #         $CMD
       
-      - name: Report Results
-        if: always()
-        run: |
-          echo "AWS-Nuke execution completed"
-          echo "Mode: ${{ env.DRY_RUN == 'true' && 'Dry Run' || 'Destructive' }}"
-          echo "Target Accounts: ${{ env.TARGET_ACCOUNTS }}"
+  #     - name: Report Results
+  #       if: always()
+  #       run: |
+  #         echo "AWS-Nuke execution completed"
+  #         if [ "$DRY_RUN" == "true" ]; then
+  #           echo "Mode: Dry Run"
+  #         else
+  #           echo "Mode: Destructive"
+  #         echo "Target Accounts: $TARGET_ACCOUNTS"
+  #         echo "Target Accounts: $TARGET_ACCOUNTS"
