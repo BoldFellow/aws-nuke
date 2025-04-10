@@ -26,122 +26,15 @@ on:
         type: string
         required: false
         default: "772886489592"  # Management account
-      multiple_passes:
-        description: 'Perform multiple passes to handle dependencies'
-        type: boolean
-        default: true
-      pass_count:
-        description: 'Number of passes to perform if multiple passes is enabled'
-        type: number
-        default: 3
 
 env:
   AWS_REGION: 'us-east-1'
 
 jobs:
-  fetch-accounts:
-    runs-on: ubuntu-latest
-    outputs:
-      target_accounts: ${{ steps.get-accounts.outputs.target_accounts }}
-    steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v3
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: us-east-1
-          role-session-name: GitHubActionsAWSNuke
-    
-      - name: Get organization accounts
-        id: get-accounts
-        run: |
-          # Get all accounts in the organization
-          echo "Fetching accounts from AWS Organizations..."
-          ACCOUNTS=$(aws organizations list-accounts --query "Accounts[?Status=='ACTIVE'].Id" --output text || echo "")
-          
-          # Check if we got any accounts
-          if [ -z "$ACCOUNTS" ]; then
-            echo "Warning: No accounts returned from Organizations API. Are you running in the management account?"
-            echo "No accounts found to process."
-            echo "target_accounts=" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-          
-          echo "Found accounts: $ACCOUNTS"
-          
-          # Create an array from the space-separated account list
-          ACCOUNTS_ARRAY=($ACCOUNTS)
-          FILTERED_ACCOUNTS=()
-          
-          # Management account ID
-          MGMT_ACCOUNT="772886489592"
-          echo "Management account ID: $MGMT_ACCOUNT"
-          
-          # Add accounts to the filtered list, excluding management account
-          for ACCOUNT in "${ACCOUNTS_ARRAY[@]}"; do
-            if [ "$ACCOUNT" != "$MGMT_ACCOUNT" ]; then
-              FILTERED_ACCOUNTS+=("$ACCOUNT")
-            else
-              echo "Excluding management account: $ACCOUNT"
-            fi
-          done
-          
-          # Handle manual exclusions if provided
-          EXCLUDED="${{ github.event.inputs.excluded_accounts }}"
-          if [ -n "$EXCLUDED" ]; then
-            echo "Processing manual exclusions: $EXCLUDED"
-            IFS=',' read -ra EXCLUDE_ARRAY <<< "$EXCLUDED"
-            
-            # Create a temporary array for the second filtering
-            TEMP_ACCOUNTS=()
-            
-            for ACCOUNT in "${FILTERED_ACCOUNTS[@]}"; do
-              EXCLUDE_THIS=false
-              for EXCLUDE_ID in "${EXCLUDE_ARRAY[@]}"; do
-                if [ "$ACCOUNT" = "$EXCLUDE_ID" ]; then
-                  EXCLUDE_THIS=true
-                  echo "Excluding manually specified account: $ACCOUNT"
-                  break
-                fi
-              done
-              
-              if [ "$EXCLUDE_THIS" = false ]; then
-                TEMP_ACCOUNTS+=("$ACCOUNT")
-              fi
-            done
-            
-            # Update the filtered accounts array
-            FILTERED_ACCOUNTS=("${TEMP_ACCOUNTS[@]}")
-          fi
-          
-          # Handle targeted accounts if provided
-          TARGET_ACCOUNTS="${{ github.event.inputs.target_accounts }}"
-          if [ -n "$TARGET_ACCOUNTS" ]; then
-            echo "Using manually targeted accounts: $TARGET_ACCOUNTS"
-            IFS=',' read -ra TARGET_ARRAY <<< "$TARGET_ACCOUNTS"
-            
-            # Replace filtered accounts with targeted accounts (excluding management)
-            FILTERED_ACCOUNTS=()
-            for TARGET_ID in "${TARGET_ARRAY[@]}"; do
-              if [ "$TARGET_ID" != "$MGMT_ACCOUNT" ]; then
-                FILTERED_ACCOUNTS+=("$TARGET_ID")
-              else
-                echo "Excluding management account from targets: $TARGET_ID"
-              fi
-            done
-          fi
-          
-          # Convert array back to comma-separated string
-          FINAL_ACCOUNTS=$(IFS=,; echo "${FILTERED_ACCOUNTS[*]}")
-          
-          echo "Final account list: ${FILTERED_ACCOUNTS[*]}"
-          echo "Accounts to be processed: $FINAL_ACCOUNTS"
-          echo "target_accounts=$FINAL_ACCOUNTS" >> $GITHUB_OUTPUT
-
   aws-nuke:
     name: Run AWS-Nuke
     runs-on: ubuntu-latest
-    needs: fetch-accounts
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -150,14 +43,13 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             echo "DRY_RUN=${{ github.event.inputs.dry_run }}" >> $GITHUB_ENV
-            echo "MULTIPLE_PASSES=${{ github.event.inputs.multiple_passes }}" >> $GITHUB_ENV
-            echo "PASS_COUNT=${{ github.event.inputs.pass_count }}" >> $GITHUB_ENV
           else
             echo "DRY_RUN=true" >> $GITHUB_ENV
-            echo "MULTIPLE_PASSES=true" >> $GITHUB_ENV
-            echo "PASS_COUNT=3" >> $GITHUB_ENV
           fi
-          echo "TARGET_ACCOUNTS=${{ needs.fetch-accounts.outputs.target_accounts }}" >> $GITHUB_ENV
+          echo "TARGET_ACCOUNTS=${{ github.event.inputs.target_accounts }}" >> $GITHUB_ENV
+          echo "EXCLUDED_ACCOUNTS=${{ github.event.inputs.excluded_accounts }}" >> $GITHUB_ENV
+          echo "MULTIPLE_PASSES=${{ github.event.inputs.multiple_passes }}" >> $GITHUB_ENV
+          echo "PASS_COUNT=${{ github.event.inputs.pass_count }}" >> $GITHUB_ENV
       
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v3
@@ -175,241 +67,59 @@ jobs:
       
       - name: Create AWS-Nuke config
         run: |
-          cat > nuke-config.yaml <<'EOL'
+          # Generate the AWS-Nuke configuration file
+          cat > nuke-config.yaml <<EOL
           regions:
             - global
             - us-east-1
-            # - us-east-2
-            # - us-west-1
-            # - us-west-2
-            # - eu-west-1
-            # - eu-central-1
-            # - ap-southeast-1
-            # - ap-southeast-2
-            # - ap-northeast-1
-            # - sa-east-1
           
           account-blocklist:
             - "772886489592"  # Management account
           
-          # Specify resource order for proper dependency handling
-          prerun-order:
-            # Network cleanup order
-            - EC2RouteTableAssociation  # First remove route table associations
-            - EC2SubnetRouteTableAssociation
-            - EC2NetworkInterfaceAttachment
-            - EC2NetworkInterface
-            - EC2InternetGatewayAttachment
-            - EC2VPCGatewayAttachment
-            - EC2NATGateway
-            - EC2Route
-            - EC2SecurityGroup
-            - EC2Subnet
-            - EC2RouteTable
-            - EC2InternetGateway
-            - EC2VPC
-            - EC2DHCPOption
-            
-            # ELB and related resources
-            - ElasticLoadBalancingV2TargetGroup
-            - ElasticLoadBalancingV2LoadBalancer
-            - ElasticLoadBalancer
-          
-          # accounts:
-          #   # This will apply to all accounts
-          #   "*":
-          #     filters:
-          #       # Exclude key roles and resources
-          #       IAMRole:
-          #         - "OrganizationAccountAccessRole"
-          #         - "AWSServiceRoleFor*"
-          #       IAMRolePolicyAttachment:
-          #         - "role:OrganizationAccountAccessRole:*"
-          #       IAMPolicy:
-          #         - "default"
-          #       CloudFormationStack:
-          #         - "StackSet-AWS-Landing-Zone*"
-          #       EC2SecurityGroup:
-          #         - property:GroupName=default
-          #       KMSAlias:
-          #         - property:AliasName=^alias/aws/.*
-              
-          #     # Special handling for default VPCs and other resources
-          #     prerun:
-          #       EC2VPC:
-          #         - "property:IsDefault=true":
-          #             config:
-          #               force-delete: true
-          #       EC2RouteTable:
-          #         - "property:Associations[*].Main=true":
-          #             config:
-          #               force-delete: true
-          
-          resource-types:
-            # Include resources to explicitly target
-            targets:
-              # EC2 & Compute Resources
-              - EC2Instance
-              - EC2Volume
-              - EC2Snapshot
-              - EC2KeyPair
-              - EC2SecurityGroup
-              - EC2Address
-              - AutoScalingGroup
-              - LaunchConfiguration
-              - LaunchTemplate
-              
-              # Network Resources
-              - EC2VPC
-              - EC2Subnet
-              - EC2RouteTable
-              - EC2Route
-              - EC2InternetGateway
-              - EC2NatGateway
-              - EC2EIP
-              - EC2DHCPOption
-              - EC2VPCEndpoint
-              - EC2NetworkACL
-              - EC2NetworkInterface
-              - EC2CustomerGateway
-              - EC2VPNGateway
-              - EC2VPNConnection
-              - EC2TransitGateway
-              - EC2TransitGatewayRouteTable
-              - EC2TransitGatewayVpcAttachment
-              - EC2RouteTableAssociation
-              - EC2SubnetRouteTableAssociation
-              - EC2InternetGatewayAttachment
-              - EC2VPCGatewayAttachment
-              
-              # Load Balancing & DNS
-              - ElasticLoadBalancer
-              - ElasticLoadBalancingV2LoadBalancer
-              - ElasticLoadBalancingV2TargetGroup
-              - Route53HostedZone
-              - Route53ResourceRecordSet
-              
-              # Containers & Orchestration
-              - ECSCluster
-              - ECSService
-              - ECSTaskDefinition
-              - EKSCluster
-              
-              # Database Services
-              - RDSInstance
-              - RDSCluster
-              - RDSClusterParameterGroup
-              - RDSParameterGroup
-              - RDSOptionGroup
-              - RDSSubnetGroup
-              - DynamoDBTable
-              - ElasticacheCluster
-              - ElasticacheSubnetGroup
-              - RedshiftCluster
-              
-              # Storage
-              - S3Bucket
-              - S3Object
-              - EBSVolume
-              - EFSFileSystem
-              - EFSMountTarget
-              
-              # Serverless & Functions
-              - Lambda
-              - LambdaFunction
-              - LambdaLayer
-              
-              # Application Services
-              - SQSQueue
-              - SNSTopic
-              - SNSSubscription
-              - CloudWatchAlarm
-              - CloudWatchDashboard
-              - CloudWatchLogGroup
-              
-              # Deployment & Management
-              - CloudFormationStack
-              
-              # Application Services
-              - ElasticBeanstalkApplication
-              - ElasticBeanstalkEnvironment
-              
-              # CDN & Media
-              - CloudFrontDistribution
-              
-              # API Gateway
-              - APIGatewayRestAPI
-              - APIGatewayResource
-              - APIGatewayStage
-              
-              # Secrets & Parameters
-              - SecretsManagerSecret
-              - SSMParameter
-            
-            # Exclude resources we don't want to delete
-            excludes:
-              # IAM resources (skip completely)
-              - IAMUser
-              - IAMUserPolicyAttachment
-              - IAMUserAccessKey
-              - IAMGroup
-              - IAMGroupPolicy
-              - IAMGroupPolicyAttachment
-              - IAMRole
-              - IAMRolePolicy
-              - IAMRolePolicyAttachment
-              - IAMPolicy
-              - IAMInstanceProfile
-              
-              # Default/critical AWS resources
-              - KMSKey
-              - CloudTrail
+          accounts:
           EOL
           
-          # Print the config file for debugging
-          echo "Generated AWS-Nuke config:"
-          cat nuke-config.yaml
+          # Add target accounts to the config
+          IFS=',' read -ra ACCOUNT_ARRAY <<< "$TARGET_ACCOUNTS"
+          for ACCOUNT in "${ACCOUNT_ARRAY[@]}"; do
+            ACCOUNT=$(echo "$ACCOUNT" | tr -d ' \t\n\r')
+            if [ -n "$ACCOUNT" ] && [ "$ACCOUNT" != "772886489592" ]; then
+              cat >> nuke-config.yaml <<EOL
+            "$ACCOUNT":
+              filters:
+                IAMRole:
+                  - "OrganizationAccountAccessRole"
+          EOL
+            fi
+          done
       
       - name: Run AWS-Nuke
         run: |
-          # First, list accounts to nuke 
           ACCOUNTS_TO_NUKE=$(echo "$TARGET_ACCOUNTS" | tr ',' ' ')
-          
           if [ -z "$ACCOUNTS_TO_NUKE" ]; then
             echo "No accounts to process. Exiting."
             exit 0
           fi
           
-          # Determine pass count for multiple passes
           if [ "$MULTIPLE_PASSES" == "true" ]; then
             PASSES=$PASS_COUNT
           else
             PASSES=1
           fi
           
-          # For each account, run AWS-Nuke
           for ACCOUNT_ID in $ACCOUNTS_TO_NUKE; do
             if [ "$ACCOUNT_ID" != "772886489592" ]; then
               echo "Processing account: $ACCOUNT_ID"
               ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/OrganizationAccountAccessRole"
               
-              # Perform multiple passes if enabled
               for (( pass=1; pass<=PASSES; pass++ )); do
                 echo "Starting Pass $pass of $PASSES for account $ACCOUNT_ID"
-                
-                # Base command
                 CMD="aws-nuke --config nuke-config.yaml --force --assume-role-arn $ROLE_ARN"
-                
-                # Add dry-run flag if needed
                 if [ "$DRY_RUN" == "true" ]; then
                   CMD="$CMD --dry-run"
                 fi
-                
-                # Run AWS-Nuke
                 echo "Running command: $CMD"
                 $CMD || echo "Failed for account $ACCOUNT_ID on pass $pass"
-                
-                # Sleep between passes to avoid rate limiting
                 if [ $pass -lt $PASSES ]; then
                   echo "Sleeping 30 seconds between passes..."
                   sleep 30
