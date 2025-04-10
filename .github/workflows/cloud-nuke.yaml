@@ -34,7 +34,7 @@ on:
 
 env:
   AWS_REGION: 'us-east-1'
-  CLOUD_NUKE_VERSION: 'v0.32.0'  # Update to the latest version as needed
+  CLOUD_NUKE_VERSION: 'v0.40.0'  # Update to the latest version as needed
 
 jobs:
   test-auth:
