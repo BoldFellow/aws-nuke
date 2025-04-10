@@ -326,34 +326,49 @@ jobs:
       
       - name: Run AWS-Nuke
         run: |
-          # First, list accounts to nuke 
-          ACCOUNTS_TO_NUKE=$(echo "$TARGET_ACCOUNTS" | tr ',' ' ')
-          
-          if [ -z "$ACCOUNTS_TO_NUKE" ]; then
-            echo "No accounts to process. Exiting."
-            exit 0
-          fi
-          
-          # For each account, run AWS-Nuke separately
-          for ACCOUNT_ID in $ACCOUNTS_TO_NUKE; do
-            if [ "$ACCOUNT_ID" != "772886489592" ]; then
-              echo "Processing account: $ACCOUNT_ID"
-              
-              ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/OrganizationAccountAccessRole"
-              
-              CMD="aws-nuke --config nuke-config.yaml --force --assume-role-arn $ROLE_ARN"
-              
-              # Add dry-run flag
-              if [ "$DRY_RUN" != "true" ]; then
-                CMD="$CMD --no-dry-run"
-              fi
-              
-              echo "Running command: $CMD"
-              $CMD || echo "Failed for account $ACCOUNT_ID"
-            else
-              echo "Skipping management account $ACCOUNT_ID"
+            # First, list accounts to nuke 
+            ACCOUNTS_TO_NUKE=$(echo "$TARGET_ACCOUNTS" | tr ',' ' ')
+            
+            if [ -z "$ACCOUNTS_TO_NUKE" ]; then
+              echo "No accounts to process. Exiting."
+              exit 0
             fi
-          done
+            
+            # For each account, run AWS-Nuke
+            for ACCOUNT_ID in $ACCOUNTS_TO_NUKE; do
+              if [ "$ACCOUNT_ID" != "772886489592" ]; then
+                echo "Processing account: $ACCOUNT_ID"
+                
+                # Get temporary credentials using AWS Organizations
+                echo "Assuming OrganizationAccountAccessRole in account $ACCOUNT_ID"
+                CREDENTIALS=$(aws sts assume-role --role-arn "arn:aws:iam::${ACCOUNT_ID}:role/OrganizationAccountAccessRole" --role-session-name "AWSNukeSession" --query "Credentials" --output json)
+                
+                if [ $? -eq 0 ]; then
+                  # Extract credentials
+                  export AWS_ACCESS_KEY_ID=$(echo $CREDENTIALS | jq -r '.AccessKeyId')
+                  export AWS_SECRET_ACCESS_KEY=$(echo $CREDENTIALS | jq -r '.SecretAccessKey')
+                  export AWS_SESSION_TOKEN=$(echo $CREDENTIALS | jq -r '.SessionToken')
+                  
+                  # Run AWS-Nuke with these credentials
+                  CMD="aws-nuke --config nuke-config.yaml --force"
+                  
+                  # Add dry-run flag
+                  if [ "$DRY_RUN" != "true" ]; then
+                    CMD="$CMD --no-dry-run"
+                  fi
+                  
+                  echo "Running command: $CMD"
+                  $CMD || echo "Failed for account $ACCOUNT_ID"
+                  
+                  # Reset credentials
+                  unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+                else
+                  echo "Failed to assume role in account $ACCOUNT_ID"
+                fi
+              else
+                echo "Skipping management account $ACCOUNT_ID"
+              fi
+            done
       
       - name: Report Results
         if: always()
