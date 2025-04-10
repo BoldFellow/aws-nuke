@@ -17,11 +17,6 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: us-east-1
           role-session-name: GitHubActionsAWSNuke
-      
-      - name: Test AWS access
-        run: |
-          aws sts get-caller-identity
-          echo "Authentication successful!"
     
       - name: Get organization accounts
         id: get-accounts

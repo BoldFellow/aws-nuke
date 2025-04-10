@@ -31,12 +31,8 @@ env:
   AWS_REGION: 'us-east-1'
 
 jobs:
-  fetch-accounts:
-    name: Fetch Organization Accounts
+  test-auth:
     runs-on: ubuntu-latest
-    outputs:
-      target_accounts: ${{ steps.get-accounts.outputs.target_accounts }}
-    
     steps:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v3
@@ -44,37 +40,50 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: us-east-1
           role-session-name: GitHubActionsAWSNuke
-      
+    
       - name: Get organization accounts
         id: get-accounts
         run: |
           # Get all accounts in the organization
-          ACCOUNTS=$(aws organizations list-accounts --query "Accounts[?Status=='ACTIVE'].Id" --output text)
+          echo "Fetching accounts from AWS Organizations..."
+          ACCOUNTS=$(aws organizations list-accounts --query "Accounts[?Status=='ACTIVE'].Id" --output text || echo "")
+          
+          # Check if we got any accounts
+          if [ -z "$ACCOUNTS" ]; then
+            echo "Warning: No accounts returned from Organizations API. Are you running in the management account?"
+            echo "target_accounts=" >> $GITHUB_OUTPUT
+            echo "No accounts found to process."
+            exit 0
+          fi
+          
+          echo "Found accounts: $ACCOUNTS"
           
           # Handle manual exclusions if provided
-          if [ -n "${{ github.event.inputs.excluded_accounts }}" ]; then
-            EXCLUDED="${{ github.event.inputs.excluded_accounts }}"
-            for ACCOUNT in $EXCLUDED; do
-              ACCOUNTS=$(echo "$ACCOUNTS" | grep -v "$ACCOUNT")
-            done
-          else
-            # Default exclusions - just the management account
-            DEFAULT_EXCLUDED="772886489592"
-            for ACCOUNT in $DEFAULT_EXCLUDED; do
-              ACCOUNTS=$(echo "$ACCOUNTS" | grep -v "$ACCOUNT")
+          EXCLUDED="${{ github.event.inputs.excluded_accounts }}"
+          if [ -n "$EXCLUDED" ]; then
+            echo "Excluding manually specified accounts: $EXCLUDED"
+            for ACCOUNT in $(echo $EXCLUDED | tr ',' ' '); do
+              ACCOUNTS=$(echo "$ACCOUNTS" | grep -v "$ACCOUNT" || echo "$ACCOUNTS")
             done
           fi
           
+          # Always exclude the management account
+          MGMT_ACCOUNT="772886489592"
+          echo "Excluding management account: $MGMT_ACCOUNT"
+          ACCOUNTS=$(echo "$ACCOUNTS" | grep -v "$MGMT_ACCOUNT" || echo "$ACCOUNTS")
+          
           # Handle targeted accounts if provided
-          if [ -n "${{ github.event.inputs.target_accounts }}" ]; then
-            ACCOUNTS="${{ github.event.inputs.target_accounts }}"
+          TARGET_ACCOUNTS="${{ github.event.inputs.target_accounts }}"
+          if [ -n "$TARGET_ACCOUNTS" ]; then
+            echo "Using manually targeted accounts: $TARGET_ACCOUNTS"
+            ACCOUNTS="$TARGET_ACCOUNTS"
           fi
           
           # Format the accounts for AWS-Nuke
-          ACCOUNTS=$(echo "$ACCOUNTS" | tr ' ' ',')
+          ACCOUNTS=$(echo "$ACCOUNTS" | tr ' ' ',' | tr -d '\n')
+          echo "Final account list: $ACCOUNTS"
           echo "target_accounts=$ACCOUNTS" >> $GITHUB_OUTPUT
           echo "Accounts to be processed: $ACCOUNTS"
-  
   # aws-nuke:
   #   name: Run AWS-Nuke
   #   runs-on: ubuntu-latest
