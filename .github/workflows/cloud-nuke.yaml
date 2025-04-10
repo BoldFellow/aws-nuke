@@ -1,4 +1,4 @@
-name: AWS-Nuke Organization Cleanup
+name: AWS Cloud-Nuke Organization Cleanup
 
 # Add necessary permissions for OIDC authentication
 permissions:
@@ -6,9 +6,9 @@ permissions:
   contents: read
 
 on:
-  # # Scheduled trigger
-  # schedule:
-  #   - cron: '0 2 * * 6'  # Runs at 2 AM UTC every Saturday
+#   # Scheduled trigger
+#   schedule:
+#     - cron: '0 2 * * 6'  # Runs at 2 AM UTC every Saturday
   
   # Manual trigger
   workflow_dispatch:
@@ -26,9 +26,15 @@ on:
         type: string
         required: false
         default: "772886489592"  # Management account
+      older_than:
+        description: 'Delete resources older than X days'
+        type: string
+        default: "0"
+        required: false
 
 env:
   AWS_REGION: 'us-east-1'
+  CLOUD_NUKE_VERSION: 'v0.32.0'  # Update to the latest version as needed
 
 jobs:
   test-auth:
@@ -41,7 +47,7 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: us-east-1
-          role-session-name: GitHubActionsAWSNuke
+          role-session-name: GitHubActionsCloudNuke
     
       - name: Get organization accounts
         id: get-accounts
@@ -129,8 +135,8 @@ jobs:
           echo "Accounts to be processed: $FINAL_ACCOUNTS"
           echo "target_accounts=$FINAL_ACCOUNTS" >> $GITHUB_OUTPUT
 
-  aws-nuke:
-    name: Run AWS-Nuke
+  cloud-nuke:
+    name: Run Cloud-Nuke
     runs-on: ubuntu-latest
     needs: test-auth
     
@@ -142,8 +148,10 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             echo "DRY_RUN=${{ github.event.inputs.dry_run }}" >> $GITHUB_ENV
+            echo "OLDER_THAN=${{ github.event.inputs.older_than }}" >> $GITHUB_ENV
           else
             echo "DRY_RUN=true" >> $GITHUB_ENV
+            echo "OLDER_THAN=0" >> $GITHUB_ENV
           fi
           echo "TARGET_ACCOUNTS=${{ needs.test-auth.outputs.target_accounts }}" >> $GITHUB_ENV
       
@@ -152,183 +160,115 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: us-east-1
-          role-session-name: GitHubActionsAWSNuke
+          role-session-name: GitHubActionsCloudNuke
       
-      - name: Download AWS-Nuke
+      - name: Download Cloud-Nuke
         run: |
-          LATEST_VERSION=$(curl -s https://api.github.com/repos/rebuy-de/aws-nuke/releases/latest | jq -r .tag_name)
-          curl -sL "https://github.com/rebuy-de/aws-nuke/releases/download/${LATEST_VERSION}/aws-nuke-${LATEST_VERSION}-linux-amd64.tar.gz" | tar xz
-          chmod +x ./aws-nuke-${LATEST_VERSION}-linux-amd64
-          sudo mv ./aws-nuke-${LATEST_VERSION}-linux-amd64 /usr/local/bin/aws-nuke
+          curl -sL "https://github.com/gruntwork-io/cloud-nuke/releases/download/${CLOUD_NUKE_VERSION}/cloud-nuke_linux_amd64" -o cloud-nuke
+          chmod +x ./cloud-nuke
+          sudo mv ./cloud-nuke /usr/local/bin/cloud-nuke
+          cloud-nuke --version
       
-      - name: Create AWS-Nuke config
+      - name: Create Cloud-Nuke config
         run: |
-          # Get the target accounts as an array
-          IFS=',' read -ra ACCOUNT_ARRAY <<< "$TARGET_ACCOUNTS"
-          
-          cat > nuke-config.yaml <<EOL
+          cat > cloud-nuke-config.yaml <<EOL
           regions:
-            - global
-            - us-east-1
-            # - us-east-2
-            # - us-west-1
-            # - us-west-2
-            # - eu-west-1
-            # - eu-central-1
-            # - ap-southeast-1
-            # - ap-southeast-2
-            # - ap-northeast-1
-            # - sa-east-1
+            - "us-east-1"
+            # - "us-east-2"
+            # - "us-west-1"
+            # - "us-west-2"
+            # - "eu-west-1"
+            # - "eu-central-1"
+            # - "ap-southeast-1"
+            # - "ap-southeast-2"
+            # - "ap-northeast-1"
+            # - "sa-east-1"
           
-          account-blocklist:
-            - "772886489592"  # Management account
-          
-          accounts:
-          EOL
-          
-          # Add each target account to the config
-          for ACCOUNT in "${ACCOUNT_ARRAY[@]}"; do
-            # Trim any whitespace
-            ACCOUNT=$(echo "$ACCOUNT" | tr -d ' \t\n\r')
-            if [ -n "$ACCOUNT" ] && [ "$ACCOUNT" != "772886489592" ]; then
-              cat >> nuke-config.yaml <<EOL
-            "$ACCOUNT":
-              filters:
-                IAMRole:
-                  - "OrganizationAccountAccessRole"
-                  - "AWSServiceRoleFor*"
-                IAMRolePolicyAttachment:
-                  - "role:OrganizationAccountAccessRole:*"
-                IAMPolicy:
-                  - "default"
-                CloudFormationStack:
-                  - "StackSet-AWS-Landing-Zone*"
-          EOL
-            fi
-          done
-          
-          # Add the resource types section
-          cat >> nuke-config.yaml <<EOL
           resource-types:
-            targets:
-              # EC2 & Compute Resources
-              - EC2Instance
-              - EC2Volume
-              - EC2Snapshot
-              - EC2KeyPair
-              - EC2SecurityGroup
-              - EC2Address
-              
-              # VPC & Networking Resources
-              # - EC2VPC
-              # - EC2Subnet
-              # - EC2RouteTable
-              # - EC2InternetGateway
-              - EC2NatGateway
-              - EC2EIP
-              - EC2VPCEndpoint
-              - EC2NetworkACL
-              - EC2NetworkInterface
-              - EC2CustomerGateway
-              - EC2VPNGateway
-              - EC2VPNConnection
-              - EC2TransitGateway
-              - EC2TransitGatewayRouteTable
-              - EC2TransitGatewayVpcAttachment
-              
-              # Load Balancing & DNS
-              - ElasticLoadBalancer
-              - ElasticLoadBalancingV2LoadBalancer
-              - ElasticLoadBalancingV2TargetGroup
-              - Route53HostedZone
-              - Route53ResourceRecordSet
-              
-              # Containers & Orchestration
-              - ECSCluster
-              - ECSService
-              - ECSTaskDefinition
-              - EKSCluster
-              
-              # Database Services
-              - RDSInstance
-              - RDSCluster
-              - RDSClusterParameterGroup
-              - RDSParameterGroup
-              - RDSOptionGroup
-              - RDSSubnetGroup
-              - DynamoDBTable
-              - ElasticacheCluster
-              - ElasticacheSubnetGroup
-              - RedshiftCluster
-              
-              # Storage
-              - S3Bucket
-              - S3Object
-              - EBSVolume
-              - EFSFileSystem
-              - EFSMountTarget
-              
-              # Serverless & Functions
-              - Lambda
-              - LambdaFunction
-              - LambdaLayer
-              
-              # Application Services
-              - SQSQueue
-              - SNSTopic
-              - SNSSubscription
-              - CloudWatchAlarm
-              - CloudWatchDashboard
-              - CloudWatchLogGroup
-              
-              # Deployment & Management
-              - CloudFormationStack
-              - AutoScalingGroup
-              - LaunchConfiguration
-              - LaunchTemplate
-              
-              # Security & Identity
-              - KMSKey
-              # - KMSAlias
-              # - IAMGroup
-              # - IAMGroupPolicy
-              # - IAMGroupPolicyAttachment
-              # - IAMPolicy
-              
-              # Application Services
-              - ElasticBeanstalkApplication
-              - ElasticBeanstalkEnvironment
-              
-              # CDN & Media
-              - CloudFrontDistribution
-              
-              # API Gateway
-              - APIGatewayRestAPI
-              - APIGatewayResource
-              - APIGatewayStage
-              
-              # Secrets & Parameters
-              - SecretsManagerSecret
-              - SSMParameter
+            # Compute Resources
+            - EC2Instance  # EC2 instances
+            - EBS          # Elastic Block Storage volumes
+            - KeyPair      # EC2 key pairs
+            - Snapshots    # EBS snapshots
             
-            excludes:
-              - IAMUser
-              - IAMGroup
-              - IAMRole
-              - IAMPolicy
-              - IAMUserPolicyAttachment
-              - IAMGroupPolicyAttachment
-              - IAMRolePolicyAttachment
+            # Networking
+            - NatGateway   # NAT Gateways - specifically included as requested
+            - ELB          # Classic Load Balancers
+            - ELBv2        # Application and Network Load Balancers
+            - SecurityGroup # EC2 Security Groups
+            - TransitGateway # Transit Gateways
+            
+            # Storage
+            - S3           # S3 buckets and objects
+            
+            # Serverless and Functions
+            - Lambda       # Lambda functions
+            
+            # Container Services
+            - ECS          # Elastic Container Service
+            - ECSService   # ECS Services
+            - EKS          # Elastic Kubernetes Service
+            
+            # Databases
+            - DynamoDB     # DynamoDB tables
+            - RDS          # Relational Database Service instances
+            
+            # Application Services
+            - SQS          # Simple Queue Service
+            - APIGateway   # API Gateway
+            
+            # Deployment Resources
+            - CloudformationStack  # CloudFormation stacks
+            - LaunchConfiguration  # Auto Scaling launch configurations
+            - LaunchTemplate       # EC2 launch templates
+            
+            # Management & Monitoring
+            - CloudWatchDashboard  # CloudWatch dashboards
+            - CloudWatchLogGroup   # CloudWatch log groups
+            
+            # Security & Identity
+            - SecretsManager       # Secrets Manager secrets
+            - KMS                  # Key Management Service keys
+            - ACM                  # Certificate Manager certificates
+            
+            # Search Services
+            - OpenSearchDomain     # OpenSearch domains
 
+          exclude:
+            IAMUsers:
+              - "OrganizationAccountAccessRole"
+              - "AWSServiceRoleFor*"
+            EC2Instance:
+              names:
+                contains:
+                  - "protected"
+                  - "do-not-delete"
+            SecurityGroup:
+              names:
+                contains:
+                  - "default"
+            CloudformationStack:
+              names:
+                contains:
+                  - "StackSet-AWS-Landing-Zone"
+                  - "aws-cloud-formation-stack-set"
+            S3:
+              names:
+                contains:
+                  - "cloudtrail"
+                  - "config"
+                  - "flowlog"
+                  - "log-archive"
           EOL
           
-          # Print the config file for debugging
-          echo "Generated AWS-Nuke config:"
-          cat nuke-config.yaml
+          echo "Generated Cloud-Nuke config:"
+          cat cloud-nuke-config.yaml
       
-      - name: Run AWS-Nuke
+      # VPC preparation step removed as we're not deleting VPCs anymore
+      
+      - name: Run Cloud-Nuke
         run: |
-          # First, list accounts to nuke 
+          # Get the target accounts
           ACCOUNTS_TO_NUKE=$(echo "$TARGET_ACCOUNTS" | tr ',' ' ')
           
           if [ -z "$ACCOUNTS_TO_NUKE" ]; then
@@ -336,22 +276,50 @@ jobs:
             exit 0
           fi
           
-          # For each account, run AWS-Nuke separately
+          # Parse the older-than parameter
+          OLDER_THAN_PARAM=""
+          if [ "$OLDER_THAN" != "0" ]; then
+            OLDER_THAN_PARAM="--older-than ${OLDER_THAN}d"
+            echo "Will delete resources older than ${OLDER_THAN} days"
+          fi
+          
+          # For each account, run Cloud-Nuke separately
           for ACCOUNT_ID in $ACCOUNTS_TO_NUKE; do
             if [ "$ACCOUNT_ID" != "772886489592" ]; then
               echo "Processing account: $ACCOUNT_ID"
               
               ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/OrganizationAccountAccessRole"
               
-              CMD="aws-nuke --config nuke-config.yaml --force --assume-role-arn $ROLE_ARN"
+              # Build the command
+              CMD="cloud-nuke aws --config cloud-nuke-config.yaml"
               
-              # Add dry-run flag
-              if [ "$DRY_RUN" != "true" ]; then
-                CMD="$CMD --no-dry-run"
+              # Add older-than parameter if specified
+              if [ ! -z "$OLDER_THAN_PARAM" ]; then
+                CMD="$CMD $OLDER_THAN_PARAM"
               fi
+              
+              # Add dry-run flag if needed
+              if [ "$DRY_RUN" == "true" ]; then
+                CMD="$CMD --dry-run"
+              fi
+              
+              # Add remaining parameters
+              CMD="$CMD --force --log-level info"
+              
+              # Set up AWS credentials for the target account
+              temp_creds=$(aws sts assume-role \
+                --role-arn "$ROLE_ARN" \
+                --role-session-name "CloudNukeExecution" --output json)
+              
+              export AWS_ACCESS_KEY_ID=$(echo $temp_creds | jq -r .Credentials.AccessKeyId)
+              export AWS_SECRET_ACCESS_KEY=$(echo $temp_creds | jq -r .Credentials.SecretAccessKey)
+              export AWS_SESSION_TOKEN=$(echo $temp_creds | jq -r .Credentials.SessionToken)
               
               echo "Running command: $CMD"
               $CMD || echo "Failed for account $ACCOUNT_ID"
+              
+              # Unset the credentials
+              unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
             else
               echo "Skipping management account $ACCOUNT_ID"
             fi
@@ -360,10 +328,11 @@ jobs:
       - name: Report Results
         if: always()
         run: |
-          echo "AWS-Nuke execution completed"
+          echo "Cloud-Nuke execution completed"
           if [ "$DRY_RUN" == "true" ]; then
             echo "Mode: Dry Run"
           else
             echo "Mode: Destructive"
           fi
           echo "Target Accounts: $TARGET_ACCOUNTS"
+          echo "Resources older than: ${OLDER_THAN} days"
